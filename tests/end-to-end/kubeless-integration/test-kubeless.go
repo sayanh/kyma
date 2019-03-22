@@ -17,6 +17,7 @@ import (
 	"github.com/kyma-project/kyma/common/ingressgateway"
 )
 
+//test
 func deployK8s(yamlFile string) {
 	cmd := exec.Command("kubectl", "create", "-f", yamlFile)
 	stdoutStderr, err := cmd.CombinedOutput()
