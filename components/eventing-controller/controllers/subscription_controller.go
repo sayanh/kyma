@@ -3,12 +3,18 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/go-logr/logr"
 	types2 "github.com/kyma-project/kyma/components/eventing-controller/pkg/ems2/api/events/types"
 	"github.com/kyma-project/kyma/components/eventing-controller/pkg/handlers"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/record"
-	"time"
 
 	// TODO: use different package
 	"github.com/pkg/errors"
@@ -16,7 +22,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	apigatewayv1alpha1 "github.com/kyma-incubator/api-gateway/api/v1alpha1"
 	eventingv1alpha1 "github.com/kyma-project/kyma/components/eventing-controller/api/v1alpha1"
+	oryv1alpha1 "github.com/ory/oathkeeper-maester/api/v1alpha1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // SubscriptionReconciler reconciles a Subscription object
@@ -34,6 +43,8 @@ type SubscriptionReconciler struct {
 var (
 	FinalizerName = eventingv1alpha1.GroupVersion.Group
 )
+
+const SinkURLPrefix = "webhook"
 
 func NewSubscriptionReconciler(
 	client client.Client,
@@ -193,8 +204,185 @@ func (r *SubscriptionReconciler) syncBEBSubscription(subscription *eventingv1alp
 }
 
 func (r *SubscriptionReconciler) syncAPIRule(subscription *eventingv1alpha1.Subscription, result *ctrl.Result, ctx context.Context, logger logr.Logger) error {
-	// TODO
+
+	// Validate URL
+	// DynamicInformer for svc
+
+	// Extract service and ns
+	// Deletion
+
+	// Validate URL
+	sURL, err := url.ParseRequestURI(subscription.Spec.Sink)
+	if err != nil {
+		logger.Error(err, "url is invalid")
+		return nil
+	}
+
+	//err = validateK8SURL(sURL)
+	//if err != nil {
+	//	logger.Error(err, "sink is not a valid k8s internal URL")
+	//	return nil
+	//}
+
+	// Create or update APIRule
+	err = r.createOrUpdateAPIRule(*sURL, result, ctx, logger)
+	if err != nil {
+		return errors.Wrap(err, "failed to createOrUpdateAPIRule")
+	}
 	return nil
+}
+
+func (r *SubscriptionReconciler) createOrUpdateAPIRule(sink url.URL, result *ctrl.Result, ctx context.Context, logger logr.Logger) error {
+	// Look up APIRule
+	// Diff
+	// Update
+	// or
+	// Create
+	sinkHostArr := strings.Split(sink.Host, ".")
+	svcName := sinkHostArr[0]
+	svcNs := sinkHostArr[1]
+	isExternal := true
+	gateway := "kyma-gateway.kyma-system.svc.cluster.local"
+	handlerOAuth := "oauth2_introspection"
+	port, err := convertURLPortForApiRulePort(sink)
+	if err != nil {
+		return errors.Wrap(err, "conversion from URL port to APIRule port failed")
+	}
+
+	labels := map[string]string{
+		"service": svcName,
+		"beb":     "webhook",
+	}
+
+	handler := oryv1alpha1.Handler{
+		Name: handlerOAuth,
+	}
+	authenticator := &oryv1alpha1.Authenticator{
+		Handler: &handler,
+	}
+	accessStrategies := []*oryv1alpha1.Authenticator{
+		authenticator,
+	}
+	testHost := "test"
+	apiRule := apigatewayv1alpha1.APIRule{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: fmt.Sprintf("%s-", SinkURLPrefix),
+			Labels:       labels,
+			Namespace:    svcNs,
+		},
+
+		Spec: apigatewayv1alpha1.APIRuleSpec{
+			Service: &apigatewayv1alpha1.Service{
+				Name:       &svcName,
+				Port:       &port,
+				Host:       &testHost,
+				IsExternal: &isExternal,
+			},
+			Gateway: &gateway,
+			Rules: []apigatewayv1alpha1.Rule{
+				{
+					Path: sink.Path,
+					Methods: []string{
+						http.MethodPost,
+						http.MethodOptions,
+					},
+					AccessStrategies: accessStrategies,
+				},
+			},
+		},
+	}
+
+	// TODO
+	// Fetch existing ApiRule
+	// If not existing then create
+	err = r.Client.Create(ctx, &apiRule, &client.CreateOptions{})
+	if err != nil {
+		return errors.Wrap(err, "failed to create ApiRule")
+	}
+
+	// If existing compute diff with desired
+	// If there is diff update
+
+	return nil
+}
+
+//func Create(obj interface{}, result interface{}) error {
+//	u, err := ToUnstructured(obj)
+//	if err != nil {
+//		return err
+//	}
+//	var s dynamic.NamespaceableResourceInterface
+//	var created *unstructured.Unstructured
+//	if u.GetNamespace() == "" {
+//		created, err = s.Client.Create(u, v1.CreateOptions{})
+//	} else {
+//		created, err = s.Client.Namespace(u.GetNamespace()).Create(u, v1.CreateOptions{})
+//	}
+//	if err != nil {
+//		return err
+//	}
+//
+//	return FromUnstructured(created, result)
+//}
+//
+//func ToUnstructured(v interface{}) (*unstructured.Unstructured, error) {
+//	if v == nil {
+//		return nil, nil
+//	}
+//
+//	u, err := runtime.DefaultUnstructuredConverter.ToUnstructured(v)
+//	if err != nil {
+//		return nil, errors.Wrapf(err, "while converting resource %T to unstructured", v)
+//	}
+//	if len(u) == 0 {
+//		return nil, nil
+//	}
+//
+//	return &unstructured.Unstructured{Object: u}, nil
+//}
+
+//func FromUnstructured(obj *unstructured.Unstructured, v interface{}) error {
+//	if obj == nil {
+//		return nil
+//	}
+//
+//	err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, v)
+//	if err != nil {
+//		return errors.Wrapf(err, "while converting unstructured to resource %T %s", v, obj.Object)
+//	}
+//
+//	return nil
+//}
+
+func convertURLPortForApiRulePort(sink url.URL) (uint32, error) {
+	port := uint32(0)
+	if sink.Port() != "" {
+		u64, err := strconv.ParseUint(sink.Port(), 10, 32)
+		if err != nil {
+			return port, errors.Wrapf(err, "failed to convert port: %s", sink.Port())
+		}
+		port = uint32(u64)
+	}
+	if port != uint32(0) {
+		switch strings.ToLower(sink.Scheme) {
+		case "http":
+			port = uint32(80)
+		case "https":
+			port = uint32(443)
+		}
+	}
+	return port, nil
+}
+
+func validateK8SURL(sinkURL *url.URL) error {
+
+	clusterLocalSuffix := "svc.cluster.local"
+	host := strings.Split(sinkURL.Host, ":")[0]
+	if !strings.HasSuffix(host, clusterLocalSuffix) {
+		return fmt.Errorf("sink: %s is not a cluster internal URL", sinkURL.Host)
+	}
+	_, err := net.LookupHost(host)
+	return err
 }
 
 // syncInitialStatus determines the desires initial status and updates it accordingly (if conditions changed)
@@ -306,10 +494,11 @@ func (r *SubscriptionReconciler) isInDeletion(subscription *eventingv1alpha1.Sub
 }
 
 const timeoutRetryActiveEmsStatus = time.Second * 30
+
 // checkStatusActive checks if the subscription is active and if not, sets a timer for retry
-func(r*SubscriptionReconciler) checkStatusActive (subscription *eventingv1alpha1.Subscription) (statusChanged bool, retry bool, err error) {
+func (r *SubscriptionReconciler) checkStatusActive(subscription *eventingv1alpha1.Subscription) (statusChanged bool, retry bool, err error) {
 	if subscription.Status.EmsSubscriptionStatus.SubscriptionStatus == string(types2.SubscriptionStatusActive) {
-		if len(subscription.Status.FailedActivation) >0  {
+		if len(subscription.Status.FailedActivation) > 0 {
 			subscription.Status.FailedActivation = ""
 			statusChanged = true
 		}

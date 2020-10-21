@@ -5,6 +5,8 @@ import (
 	"os"
 	"time"
 
+	apigatewayv1alpha1 "github.com/kyma-incubator/api-gateway/api/v1alpha1"
+
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
@@ -25,6 +27,9 @@ func init() {
 	_ = clientgoscheme.AddToScheme(scheme)
 
 	_ = eventingv1alpha1.AddToScheme(scheme)
+
+	_ = apigatewayv1alpha1.AddToScheme(scheme)
+
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -32,7 +37,7 @@ func main() {
 	var metricsAddr string
 	var resyncPeriod time.Duration
 	flag.StringVar(&metricsAddr, "metrics-addr", ":8080", "The address the metric endpoint binds to.")
-	flag.DurationVar( &resyncPeriod, "reconcile-period",time.Minute * 10, "Period between triggering of reconciling calls" )
+	flag.DurationVar(&resyncPeriod, "reconcile-period", time.Minute*10, "Period between triggering of reconciling calls")
 	flag.Parse()
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 
@@ -40,12 +45,9 @@ func main() {
 		Scheme:             scheme,
 		MetricsBindAddress: metricsAddr,
 		Port:               9443,
-		SyncPeriod:			&resyncPeriod,
+		SyncPeriod:         &resyncPeriod,
 	})
-	if err != nil {
-		setupLog.Error(err, "unable to start manager")
-		os.Exit(1)
-	}
+
 	if err = controllers.NewSubscriptionReconciler(
 		mgr.GetClient(),
 		ctrl.Log.WithName("controllers").WithName("Subscription"),
