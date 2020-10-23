@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"k8s.io/apimachinery/pkg/types"
 	"net"
 	"net/http"
 	"net/url"
@@ -204,19 +205,34 @@ func (r *SubscriptionReconciler) syncBEBSubscription(subscription *eventingv1alp
 }
 
 func (r *SubscriptionReconciler) syncAPIRule(subscription *eventingv1alpha1.Subscription, result *ctrl.Result, ctx context.Context, logger logr.Logger) error {
-
-	// Validate URL
-	// DynamicInformer for svc
-
-	// Extract service and ns
-	// Deletion
-
 	// Validate URL
 	sURL, err := url.ParseRequestURI(subscription.Spec.Sink)
 	if err != nil {
 		logger.Error(err, "url is invalid")
 		return nil
 	}
+
+	// Validate URL
+	// DynamicInformer for svc
+	parts := strings.Split(sURL.Host, ".")
+	if len(parts) < 2 {
+		// TODO use a proper log message
+		logger.Error(fmt.Errorf("### Invalid Sink ###"), "### Invalid Sink ###")
+		return nil
+	}
+
+	svcName := parts[0]
+	svcNamespace := parts[1]
+	svcLookupKey := types.NamespacedName{Name: svcName, Namespace: svcNamespace}
+	svc := &corev1.Service{}
+	if err := r.Client.Get(ctx, svcLookupKey, svc); err != nil {
+		// TODO use a proper log message
+		logger.Error(err, "### Error while Get Sink ###")
+		return nil
+	}
+
+	// Extract service and ns
+	// Deletion
 
 	//err = validateK8SURL(sURL)
 	//if err != nil {
