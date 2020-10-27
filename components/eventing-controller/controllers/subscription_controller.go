@@ -3,7 +3,6 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"hash/fnv"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -12,8 +11,6 @@ import (
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
-
-	"k8s.io/apimachinery/pkg/util/rand"
 
 	k8slabels "k8s.io/apimachinery/pkg/labels"
 
@@ -35,7 +32,6 @@ import (
 
 	apigatewayv1alpha1 "github.com/kyma-incubator/api-gateway/api/v1alpha1"
 	eventingv1alpha1 "github.com/kyma-project/kyma/components/eventing-controller/api/v1alpha1"
-	hashutil "k8s.io/kubernetes/pkg/util/hash"
 )
 
 // SubscriptionReconciler reconciles a Subscription object
@@ -56,12 +52,15 @@ var (
 )
 
 const (
-	SinkURLPrefix                = "webhook"
-	SuffixLength                 = 6
+	SinkURLPrefix = "webhook"
+	// TODO: Think about the collisions when using length 6
+	SuffixLength                 = 10
 	ClusterLocalAPIGateway       = "kyma-gateway.kyma-system.svc.cluster.local"
 	ControllerServiceLabelKey    = "service"
 	ControllerIdentityLabelKey   = "beb"
 	ControllerIdentityLabelValue = "webhook"
+	ExternalHostPrefix           = "web"
+	ClusterLocalURLSuffix        = "svc.cluster.local"
 )
 
 func NewSubscriptionReconciler(
@@ -244,6 +243,12 @@ func (r *SubscriptionReconciler) syncAPIRule(subscription *eventingv1alpha1.Subs
 		return nil
 	}
 
+	// Validate sink URL is a cluster local URL
+	trimmedHost := strings.Split(sURL.Host, ":")[0]
+	if !strings.HasSuffix(trimmedHost, ClusterLocalURLSuffix) {
+		logger.Error(fmt.Errorf("sink does not contain %s URL", ClusterLocalURLSuffix), "")
+		return nil
+	}
 	// Validate svc is a cluster local one
 	_, err = r.validateClusterLocalService(ctx, svcNs, svcName)
 	if err != nil {
@@ -290,37 +295,39 @@ func (r *SubscriptionReconciler) createOrUpdateAPIRule(sink url.URL, subscriptio
 		ControllerServiceLabelKey:  svcName,
 		ControllerIdentityLabelKey: ControllerIdentityLabelValue,
 	}
-	existingAPIRules := &apigatewayv1alpha1.APIRuleList{}
-	err = r.Cache.List(ctx, existingAPIRules, &client.ListOptions{
-		LabelSelector: k8slabels.SelectorFromSet(labels),
-		Namespace:     svcNs,
-	})
+
+	svcPort, err := convertURLPortForApiRulePort(sink)
+	if err != nil {
+		logger.Error(err, "error while converting URL port to APIRule port")
+		return nil
+	}
+	existingAPIRule, err := r.getValidExistingAPIRule(ctx, labels, svcNs, svcPort)
 	if err != nil {
 		logger.Error(err, "error while fetching oldApiRule for labels", labels)
 		return nil
 	}
-	logger.Info("Existing APIRules", fmt.Sprintf("in ns: %s for svc: %s", svcNs, svcName), existingAPIRules.Items)
 
 	// Get all subscriptions valid for the cluster-local subscriber
-	subscriptions, err := r.getRelevantSubscriptions(svcNs, svcName, ctx)
+	subscriptions, err := r.getRelevantSubscriptions(svcNs, svcName, svcPort, ctx)
 	if err != nil {
 		logger.Error(err, "failed to fetch subscriptions for the subscriber is focus")
 		return nil
 	}
 
-	desiredAPIRule, err := r.makeAPIRule(svcNs, svcName, labels, subscriptions, sink)
+	// TODO: remove svcNs and svcName as you could dervive from the sink
+	desiredAPIRule, err := r.makeAPIRule(svcNs, svcName, labels, subscriptions, svcPort)
 	if err != nil {
 		return errors.Wrap(err, "failed to make an APIRule")
 	}
-	if len(existingAPIRules.Items) < 1 {
+	if existingAPIRule == nil {
 		err = r.Client.Create(ctx, desiredAPIRule, &client.CreateOptions{})
 		if err != nil {
 			return errors.Wrap(err, "failed to create APIRule")
 		}
 		return nil
 	}
+	logger.Info("Existing APIRules", fmt.Sprintf("in ns: %s for svc: %s", svcNs, svcName), fmt.Sprintf("%v", *existingAPIRule))
 	// Assumption: there will be one APIRule for an svc with the labels injected by the controller hence trusting the 0th element in existingAPIRules list
-	existingAPIRule := &existingAPIRules.Items[0]
 	object.ApplyExistingAPIRuleAttributes(existingAPIRule, desiredAPIRule)
 	if object.Semantic.DeepEqual(existingAPIRule, desiredAPIRule) {
 		return nil
@@ -330,7 +337,26 @@ func (r *SubscriptionReconciler) createOrUpdateAPIRule(sink url.URL, subscriptio
 	return nil
 }
 
-func (r *SubscriptionReconciler) getRelevantSubscriptions(svcNs, svcName string, ctx context.Context) ([]eventingv1alpha1.Subscription, error) {
+func (r *SubscriptionReconciler) getValidExistingAPIRule(ctx context.Context, labels map[string]string, svcNs string, port uint32) (*apigatewayv1alpha1.APIRule, error) {
+	existingAPIRules := &apigatewayv1alpha1.APIRuleList{}
+	err := r.Cache.List(ctx, existingAPIRules, &client.ListOptions{
+		LabelSelector: k8slabels.SelectorFromSet(labels),
+		Namespace:     svcNs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	// Filter APIRule based on the served port
+	for _, apiRule := range existingAPIRules.Items {
+		if *apiRule.Spec.Service.Port == port {
+			return &apiRule, nil
+		}
+	}
+	return nil, nil
+}
+
+// getRelevantSubscriptions returns a list of Subscriptions which are valid for the subscriber in focus
+func (r *SubscriptionReconciler) getRelevantSubscriptions(svcNs, svcName string, svcPort uint32, ctx context.Context) ([]eventingv1alpha1.Subscription, error) {
 	subscriptions := &eventingv1alpha1.SubscriptionList{}
 	relevantSubs := make([]eventingv1alpha1.Subscription, 0)
 	err := r.Cache.List(ctx, subscriptions, &client.ListOptions{
@@ -339,39 +365,34 @@ func (r *SubscriptionReconciler) getRelevantSubscriptions(svcNs, svcName string,
 	if err != nil {
 		return []eventingv1alpha1.Subscription{}, err
 	}
-	if len(subscriptions.Items) > 0 {
-		for _, sub := range subscriptions.Items {
-			// Filtering subscriptions which are being deleted at the moment
-			if sub.DeletionGracePeriodSeconds != nil {
-				continue
-			}
-			hostURL, err := url.ParseRequestURI(sub.Spec.Sink)
-			if err != nil {
-				// It's ok as the relevant subscription will have a valid cluster local URL in the same namespace
-				continue
-			}
-			// Filtering subscriptions valid for a valid subscriber
-			svcNsForSub, svcNameForSub, err := getSvcNsAndName(hostURL.Host)
-			if err != nil {
-				// It's ok as the relevant subscription will have a valid cluster local URL in the same namespace
-				continue
-			}
-			if svcNs == svcNsForSub && svcName == svcNameForSub {
-				relevantSubs = append(relevantSubs, sub)
-			}
+	for _, sub := range subscriptions.Items {
+		// Filtering subscriptions which are being deleted at the moment
+		if sub.DeletionTimestamp != nil {
+			continue
+		}
+		hostURL, err := url.ParseRequestURI(sub.Spec.Sink)
+		if err != nil {
+			// It's ok as the relevant subscription will have a valid cluster local URL in the same namespace
+			continue
+		}
+		// Filtering subscriptions valid for a valid subscriber
+		svcNsForSub, svcNameForSub, err := getSvcNsAndName(hostURL.Host)
+		if err != nil {
+			// It's ok as the relevant subscription will have a valid cluster local URL in the same namespace
+			continue
+		}
+		svcPortForSub, err := convertURLPortForApiRulePort(*hostURL)
+		if svcNs == svcNsForSub && svcName == svcNameForSub && svcPort == svcPortForSub {
+			relevantSubs = append(relevantSubs, sub)
 		}
 	}
 	return relevantSubs, nil
 }
 
-func (r *SubscriptionReconciler) makeAPIRule(svcNs, svcName string, labels map[string]string, subs []eventingv1alpha1.Subscription, sink url.URL) (*apigatewayv1alpha1.APIRule, error) {
-	port, err := convertURLPortForApiRulePort(sink)
-	if err != nil {
-		return nil, errors.Wrap(err, "conversion from URL port to APIRule port failed")
-	}
+func (r *SubscriptionReconciler) makeAPIRule(svcNs, svcName string, labels map[string]string, subs []eventingv1alpha1.Subscription, port uint32) (*apigatewayv1alpha1.APIRule, error) {
 
-	randomSuffix := getRandSuffix(svcNs, svcName, SuffixLength)
-	hostName := fmt.Sprintf("%s-%s", "webhook", randomSuffix)
+	randomSuffix := handlers.GetRandSuffix(SuffixLength)
+	hostName := fmt.Sprintf("%s-%s", ExternalHostPrefix, randomSuffix)
 
 	apiRule := object.NewAPIRule(svcNs, SinkURLPrefix,
 		object.WithLabels(labels),
@@ -380,14 +401,6 @@ func (r *SubscriptionReconciler) makeAPIRule(svcNs, svcName string, labels map[s
 		object.WithGateway(ClusterLocalAPIGateway),
 		object.WithRules(subs, http.MethodPost, http.MethodOptions))
 	return apiRule, nil
-}
-
-func getRandSuffix(svcNs, svcName string, l int) string {
-	svcNameNsHasher := fnv.New64()
-	hashutil.DeepHashObject(svcNameNsHasher, fmt.Sprintf("%s-%s", svcNs, svcName))
-	encodedStr := rand.SafeEncodeString(fmt.Sprint(svcNameNsHasher.Sum64()))
-	encodedStrAsRune := []rune(encodedStr)
-	return string(encodedStrAsRune[:l])
 }
 
 func convertURLPortForApiRulePort(sink url.URL) (uint32, error) {

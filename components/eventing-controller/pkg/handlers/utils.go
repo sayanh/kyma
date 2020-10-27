@@ -2,12 +2,19 @@ package handlers
 
 import (
 	"fmt"
-	eventingv1alpha1 "github.com/kyma-project/kyma/components/eventing-controller/api/v1alpha1"
+	"math/rand"
 	"strings"
+	"time"
+
+	eventingv1alpha1 "github.com/kyma-project/kyma/components/eventing-controller/api/v1alpha1"
 
 	types2 "github.com/kyma-project/kyma/components/eventing-controller/pkg/ems2/api/events/types"
 	"github.com/mitchellh/hashstructure"
 )
+
+const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+var seededRand = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 func getHash(subscription *types2.Subscription) (int64, error) {
 	if hash, err := hashstructure.Hash(subscription, nil); err != nil {
@@ -63,6 +70,15 @@ func getInternalView4Ev2(subscription *eventingv1alpha1.Subscription) (*types2.S
 	emsSubscription.WebhookAuth = auth
 
 	return emsSubscription, nil
+}
+
+// GetRandSuffix returns a random suffix of length l or -1 for the whole random string
+func GetRandSuffix(l int) string {
+	b := make([]byte, l)
+	for i := range b {
+		b[i] = charset[seededRand.Intn(len(charset))]
+	}
+	return string(b)
 }
 
 func getInternalView4Ems(subscription *types2.Subscription) (*types2.Subscription, error) {
