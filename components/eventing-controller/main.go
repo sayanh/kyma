@@ -50,7 +50,9 @@ func main() {
 
 	if err = controllers.NewSubscriptionReconciler(
 		mgr.GetClient(),
-		ctrl.Log.WithName("controllers").WithName("Subscription"),
+		mgr.GetCache(),
+		ctrl.Log.WithName("controllers").WithName("Subsc"+
+			"ription"),
 		mgr.GetEventRecorderFor("subscription-controller"),
 		mgr.GetScheme(),
 	).SetupWithManager(mgr); err != nil {
