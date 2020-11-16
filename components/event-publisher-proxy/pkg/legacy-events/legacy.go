@@ -49,7 +49,7 @@ func (t Transformer) TransformsLegacyRequestsToCE(writer http.ResponseWriter, re
 		writeJSONResponse(writer, resp)
 		return nil
 	}
-	appName := parseApplicationNameFromPath(request.URL.Path)
+	appName := ParseApplicationNameFromPath(request.URL.Path)
 	var err error
 	parameters := &apiv1.PublishEventParametersV1{}
 	decoder := json.NewDecoder(request.Body)
