@@ -305,6 +305,58 @@ var _ = Describe("Subscription Reconciliation Tests", func() {
 		})
 	})
 
+	FWhen("Subscription sink is changed (with port change)", func() {
+		It("Should update the BEB subscription webhookURL", func() {
+			subscriptionName := "test-subscription-beb-not-status-not-ready"
+			ctx := context.Background()
+
+			// create a service
+			serviceOld := reconcilertesting.NewSubscriberSvc("webhook", namespaceName)
+			ensureSubscriberSvcCreated(serviceOld, ctx)
+
+			givenSubscription := reconcilertesting.FixtureValidSubscription(subscriptionName, namespaceName, subscriptionID)
+			ensureSubscriptionCreated(givenSubscription, ctx)
+
+			By("Given subscription with none empty APIRule name")
+			subscription := &eventingv1alpha1.Subscription{ObjectMeta: metav1.ObjectMeta{Name: subscriptionName, Namespace: namespaceName}}
+			getSubscription(subscription, ctx).Should(reconcilertesting.HaveNoneEmptyAPIRuleName())
+			apiRuleOld := &apigatewayv1alpha1.APIRule{ObjectMeta: metav1.ObjectMeta{Name: subscription.Status.APIRuleName, Namespace: namespaceName}}
+			getAPIRule(apiRuleOld, ctx).Should(reconcilertesting.HaveNotEmptyAPIRule())
+			reconcilertesting.WithStatusReady(apiRuleOld)
+			updateAPIRuleStatus(apiRuleOld, ctx).ShouldNot(HaveOccurred())
+
+			By("Given subscription is ready")
+			getSubscription(subscription, ctx).Should(reconcilertesting.HaveSubscriptionReady())
+
+			By("Updating the sink")
+			newPort := 8081
+			subscription.Spec.Sink = fmt.Sprintf("https://webhook.%s.svc.cluster.local:%d", subscription.Namespace, newPort)
+			updateSubscription(subscription, ctx).Should(reconcilertesting.HaveSubscriptionReady())
+			getSubscription(subscription, ctx).ShouldNot(reconcilertesting.HaveAPIRuleName(apiRuleOld.Name))
+
+			apiRuleNew := &apigatewayv1alpha1.APIRule{ObjectMeta: metav1.ObjectMeta{Name: subscription.Status.APIRuleName, Namespace: namespaceName}}
+			getAPIRule(apiRuleNew, ctx).Should(And(
+				reconcilertesting.HaveNotEmptyHost(),
+				reconcilertesting.HaveNotEmptyAPIRule(),
+			))
+			reconcilertesting.WithStatusReady(apiRuleNew)
+			updateAPIRuleStatus(apiRuleNew, ctx).ShouldNot(HaveOccurred())
+
+			By("BEB Subscription has the same webhook URL")
+			bebCreationRequests := make([]bebtypes.Subscription, 0)
+			getBebSubscriptionCreationRequests(bebCreationRequests).Should(And(
+				ContainElement(MatchFields(IgnoreMissing|IgnoreExtras,
+					Fields{
+						"Name":       BeEquivalentTo(subscription.Name),
+						"WebhookUrl": ContainSubstring(*apiRuleNew.Spec.Service.Host),
+					},
+				))))
+
+			By("Cleanup not used APIRule")
+			getAPIRule(apiRuleOld, ctx).ShouldNot(reconcilertesting.HaveNotEmptyAPIRule())
+		})
+	})
+
 	When("BEB subscription creation failed", func() {
 		It("Should not mark the subscription as ready", func() {
 			subscriptionName := "test-subscription-beb-not-status-not-ready"
@@ -738,7 +790,10 @@ func getAPIRule(apiRule *apigatewayv1alpha1.APIRule, ctx context.Context) AsyncA
 		}
 		if err := k8sClient.Get(ctx, lookUpKey, apiRule); err != nil {
 			log.Printf("failed to fetch APIRule(%s): %v", lookUpKey.String(), err)
-			return apigatewayv1alpha1.APIRule{}
+			if k8serrors.IsNotFound(err) {
+				return apigatewayv1alpha1.APIRule{}
+			}
+			Expect(err).ShouldNot(HaveOccurred())
 		}
 		return *apiRule
 	}, bigTimeOut, bigPollingInterval)
@@ -792,7 +847,7 @@ func updateSubscription(subscription *eventingv1alpha1.Subscription, ctx context
 
 // TODO: make configurable
 const (
-	useExistingCluster       = false
+	useExistingCluster       = true
 	attachControlPlaneOutput = false
 )
 
