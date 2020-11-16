@@ -1,9 +1,11 @@
 package handler
 
 import (
-	"context"
 	"github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/legacy-events"
 	"github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/options"
+	"github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/subscribed"
+
+	"context"
 	"io/ioutil"
 	"net/http"
 	"strings"
@@ -27,8 +29,9 @@ const (
 	// noDuration signals that the dispatch step has not started yet.
 	noDuration = -1
 
-	publishEndpoint      = "/publish"
-	legacyEndpointSuffix = "/v1/events"
+	publishEndpoint          = "/publish"
+	legacyEndpointSuffix     = "/v1/events"
+	subscribedEndpointSuffix = "/v1/events/subscribed"
 )
 
 var (
@@ -53,6 +56,8 @@ type Handler struct {
 	LegacyTransformer *legacy.Transformer
 	// RequestTimeout timeout for outgoing requests
 	RequestTimeout time.Duration
+	//SubscribedProcessor processes requests for /:app/v1/events/subscribed endpoint
+	SubscribedProcessor *subscribed.Processor
 	// Logger default logger
 	Logger *logrus.Logger
 	// Options configures HTTP server
@@ -60,20 +65,17 @@ type Handler struct {
 }
 
 // NewHandler returns a new Handler instance for the Event Publisher Proxy.
-func NewHandler(receiver *receiver.HttpMessageReceiver, sender *sender.HttpMessageSender, requestTimeout time.Duration, legacyTransformer *legacy.Transformer, options *options.Options, logger *logrus.Logger) *Handler {
-	return &Handler{
-		Receiver:          receiver,
-		Sender:            sender,
-		RequestTimeout:    requestTimeout,
-		LegacyTransformer: legacyTransformer,
-		Logger:            logger,
-		Options:           options,
-	}
-}
+func NewHandler(receiver *receiver.HttpMessageReceiver, sender *sender.HttpMessageSender, requestTimeout time.Duration, legacyTransformer *legacy.Transformer, opts *options.Options, subscribedProcessor *subscribed.Processor, logger *logrus.Logger) *Handler {
 
-// Start starts the Handler with the given context.
-func (h *Handler) Start(ctx context.Context) error {
-	return h.Receiver.StartListen(ctx, health.CheckHealth(h))
+	return &Handler{
+		Receiver:            receiver,
+		Sender:              sender,
+		RequestTimeout:      requestTimeout,
+		LegacyTransformer:   legacyTransformer,
+		SubscribedProcessor: subscribedProcessor,
+		Logger:              logger,
+		Options:             opts,
+	}
 }
 
 // ServeHTTP serves an HTTP request and returns back an HTTP response.
@@ -81,7 +83,7 @@ func (h *Handler) Start(ctx context.Context) error {
 // to the EMS gateway and writes back the HTTP response.
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	// validate request method
-	if request.Method != http.MethodPost {
+	if request.Method != http.MethodPost && request.Method != http.MethodGet {
 		h.Logger.Warnf("Unexpected request method: %s", request.Method)
 		h.writeResponse(writer, http.StatusMethodNotAllowed, nil)
 		return
@@ -101,6 +103,13 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	// Publishes a legacy event as CE v1.0 to BEB
 	if isARequestWithLegacyEvent(uri) {
 		h.publishLegacyEventsAsCE(writer, request)
+		return
+	}
+
+	// Process /:application/v1/events/subscribed
+	// Fetches the list of subscriptions available for the given application
+	if isARequestForSubscriptions(uri) {
+		h.SubscribedProcessor.ExtractEventsFromSubscriptions(writer, request)
 		return
 	}
 
@@ -127,6 +136,14 @@ func isARequestWithLegacyEvent(uri string) bool {
 		return false
 	}
 	if !strings.HasSuffix(uri, legacyEndpointSuffix) {
+		return false
+	}
+	return true
+}
+
+func isARequestForSubscriptions(uri string) bool {
+	// Assuming the path should be of the form /:application/v1/events/subscribed
+	if !strings.HasSuffix(uri, subscribedEndpointSuffix) {
 		return false
 	}
 	return true
@@ -235,4 +252,9 @@ func (h *Handler) sendAndRecordDispatchTime(request *http.Request) (*http.Respon
 	resp, err := h.Sender.Send(request)
 	dispatchTime := time.Since(start)
 	return resp, dispatchTime, err
+}
+
+// Start starts the Handler with the given context.
+func (h *Handler) Start(ctx context.Context) error {
+	return h.Receiver.StartListen(ctx, health.CheckHealth(h))
 }

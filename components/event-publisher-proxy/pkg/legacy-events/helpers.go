@@ -2,7 +2,14 @@ package legacy
 
 import (
 	"github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/legacy-events/api"
+	"time"
+
 	"net/http"
+	"strings"
+)
+
+const (
+	informerSyncTimeout = 10 * time.Second
 )
 
 // ErrorResponseBadRequest returns an error of type PublishEventResponses with BadRequest status code
@@ -75,4 +82,18 @@ func CreateInvalidFieldError(field interface{}) (response *api.PublishEventRespo
 	details := []api.ErrorDetail{apiErrorDetail}
 	apiError := api.Error{Status: http.StatusBadRequest, Type: ErrorTypeValidationViolation, Message: ErrorMessageInvalidField, MoreInfo: "", Details: details}
 	return &api.PublishEventResponses{Ok: nil, Error: &apiError}
+}
+
+// ParseApplicationNameFromPath returns application name from the URL.
+// The format of the URL is: /:application-name/v1/...
+func ParseApplicationNameFromPath(path string) string {
+	// Assumption: Clients(application validator which has a flag for the path(https://github.com/kyma-project/kyma/blob/master/components/application-connectivity-validator/cmd/applicationconnectivityvalidator/applicationconnectivityvalidator.go#L49) using this endpoint must be sending request to path /:application/v1/events
+	// Hence it should be safe to return 0th index as the application name
+	pathSegments := make([]string, 0)
+	for _, segment := range strings.Split(path, "/") {
+		if strings.Trim(segment, " ") != "" {
+			pathSegments = append(pathSegments, segment)
+		}
+	}
+	return pathSegments[0]
 }

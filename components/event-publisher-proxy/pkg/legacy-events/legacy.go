@@ -44,7 +44,7 @@ func (t Transformer) TransformsLegacyRequestsToCE(writer http.ResponseWriter, re
 		writeJSONResponse(writer, resp)
 		return nil
 	}
-	appName := parseApplicationNameFromPath(request.URL.Path)
+	appName := ParseApplicationNameFromPath(request.URL.Path)
 	var err error
 	parameters := &apiv1.PublishEventParametersV1{}
 	decoder := json.NewDecoder(request.Body)
@@ -80,18 +80,6 @@ func (t Transformer) TransformsLegacyRequestsToCE(writer http.ResponseWriter, re
 	}
 
 	return event
-}
-
-func parseApplicationNameFromPath(path string) string {
-	// Assumption: Clients(application validator which has a flag for the path(https://github.com/kyma-project/kyma/blob/master/components/application-connectivity-validator/cmd/applicationconnectivityvalidator/applicationconnectivityvalidator.go#L49) using this endpoint must be sending request to path /:application/v1/events
-	// Hence it should be safe to return 0th index as the application name
-	pathSegments := make([]string, 0)
-	for _, segment := range strings.Split(path, "/") {
-		if strings.Trim(segment, " ") != "" {
-			pathSegments = append(pathSegments, segment)
-		}
-	}
-	return pathSegments[0]
 }
 
 func checkParameters(parameters *apiv1.PublishEventParametersV1) (response *apiv1.PublishEventResponses) {
