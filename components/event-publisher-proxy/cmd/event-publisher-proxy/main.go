@@ -57,11 +57,7 @@ func main() {
 	logger.Info("Informers are synced successfully")
 
 	// start handler which blocks until it receives a shutdown signal
-<<<<<<< HEAD
-	if err := handler.NewHandler(messageReceiver, messageSender, cfg.RequestTimeout, legacyTransformer, opts, logger).Start(ctx); err != nil {
-=======
 	if err := handler.NewHandler(messageReceiver, messageSender, cfg.RequestTimeout, legacyTransformer, opts, subscribedProcessor, logger).Start(ctx); err != nil {
->>>>>>> 88ee85c91 (Add /:app/v1/events/subscribed endpoint with the same functionality from)
 		logger.Fatalf("Start handler failed with error: %s", err)
 	}
 	logger.Info("Shutdown the Event Publisher Proxy")

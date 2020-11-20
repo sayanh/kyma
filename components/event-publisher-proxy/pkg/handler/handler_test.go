@@ -2,17 +2,12 @@ package handler
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
-<<<<<<< HEAD
-	"io"
-=======
 	"github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/legacy-events"
 	"github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/options"
 	"github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/subscribed"
 	eventingv1alpha1 "github.com/kyma-project/kyma/components/eventing-controller/api/v1alpha1"
->>>>>>> 88ee85c91 (Add /:app/v1/events/subscribed endpoint with the same functionality from)
 	"io/ioutil"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -23,23 +18,9 @@ import (
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"net/http"
 	"reflect"
-<<<<<<< HEAD
-	"regexp"
-	"strconv"
 	"testing"
 	"time"
 
-	"github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/legacy-events"
-	"github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/options"
-
-	"github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/oauth"
-	"github.com/sirupsen/logrus"
-
-=======
-	"testing"
-	"time"
-
->>>>>>> 88ee85c91 (Add /:app/v1/events/subscribed endpoint with the same functionality from)
 	legacyapi "github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/legacy-events/api"
 	"github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/oauth"
 	"github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/receiver"
@@ -145,7 +126,7 @@ func TestHandler(t *testing.T) {
 		},
 	}
 
-	port, err := generatePort()
+	port, err := testingutils.GeneratePort()
 	if err != nil {
 		t.Fatalf("failed to generate port: %v", err)
 	}
@@ -204,7 +185,7 @@ func TestHandler(t *testing.T) {
 func TestHandlerTimeout(t *testing.T) {
 	t.Parallel()
 
-	port, err := generatePort()
+	port, err := testingutils.GeneratePort()
 	if err != nil {
 		t.Fatalf("failed to generate port: %v", err)
 	}
@@ -259,7 +240,7 @@ func TestHandlerTimeout(t *testing.T) {
 
 func TestHandlerForLegacyEvents(t *testing.T) {
 	t.Parallel()
-	port, err := generatePort()
+	port, err := testingutils.GeneratePort()
 	if err != nil {
 		t.Fatalf("failed to generate port: %v", err)
 	}
@@ -423,7 +404,7 @@ func TestHandlerForLegacyEvents(t *testing.T) {
 
 func TestHandlerForBEBFailures(t *testing.T) {
 	t.Parallel()
-	port, err := generatePort()
+	port, err := testingutils.GeneratePort()
 	if err != nil {
 		t.Fatalf("failed to generate port: %v", err)
 	}
@@ -518,10 +499,9 @@ func TestHandlerForBEBFailures(t *testing.T) {
 	}
 }
 
-<<<<<<< HEAD
 func TestHandlerForHugeRequests(t *testing.T) {
 	t.Parallel()
-	port, err := generatePort()
+	port, err := testingutils.GeneratePort()
 	if err != nil {
 		t.Fatalf("failed to generate port: %v", err)
 	}
@@ -557,14 +537,14 @@ func TestHandlerForHugeRequests(t *testing.T) {
 
 	// Limiting the accepted size of the request to 2 Bytes
 	opts := &options.Options{MaxRequestSize: 2}
-	handler := NewHandler(msgReceiver, msgSender, cfg.RequestTimeout, legacyTransformer, opts, logrus.New())
+	handler := NewHandler(msgReceiver, msgSender, cfg.RequestTimeout, legacyTransformer, opts, nil, logrus.New())
 	go func() {
 		if err := handler.Start(ctx); err != nil {
 			t.Errorf("failed to start handler with error: %v", err)
 		}
 	}()
 
-	waitForHandlerToStart(t, healthEndpoint)
+	testingutils.WaitForHandlerToStart(t, healthEndpoint)
 
 	testCases := []struct {
 		name           string
@@ -607,32 +587,18 @@ func TestHandlerForHugeRequests(t *testing.T) {
 	}
 }
 
-// getMissingFieldValidationErrorFor generates an Error message for a missing field
-func getMissingFieldValidationErrorFor(field string) *legacyapi.Error {
-	return &legacyapi.Error{
-		Status:  400,
-		Type:    "validation_violation",
-		Message: "Missing field",
-		Details: []legacyapi.ErrorDetail{
-			{
-				Field:    field,
-				Type:     "missing_field",
-				Message:  "Missing field",
-				MoreInfo: "",
-			},
-		},
-	}
-}
-=======
 func TestHandlerForSubscribedEndpoint(t *testing.T) {
+	t.Parallel()
+	port, err := testingutils.GeneratePort()
+	if err != nil {
+		t.Fatalf("failed to generate port: %v", err)
+	}
 	var (
 		subscribedEndpointFormat = "http://localhost:%d/%s/v1/events/subscribed"
-		port                     = 8888
 		healthEndpoint           = fmt.Sprintf("http://localhost:%d/healthz", port)
 		bebNs                    = "/beb.namespace"
 		eventTypePrefix          = "event.type.prefix."
 	)
->>>>>>> 88ee85c91 (Add /:app/v1/events/subscribed endpoint with the same functionality from)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -649,51 +615,10 @@ func TestHandlerForSubscribedEndpoint(t *testing.T) {
 	opts := &options.Options{MaxRequestSize: 65536}
 	legacyTransformer := legacy.NewTransformer(cfg.BEBNamespace, cfg.EventTypePrefix)
 
-<<<<<<< HEAD
-func TestIsARequestWithLegacyEvent(t *testing.T) {
-	testCases := []struct {
-		inputURI     string
-		wantedResult bool
-	}{
-		{
-			inputURI:     "/app/v1/events",
-			wantedResult: true,
-		},
-		{
-			inputURI:     "///app/v1/events",
-			wantedResult: true,
-		},
-		{
-			inputURI:     "///app/v1//events",
-			wantedResult: false,
-		},
-		{
-			inputURI:     "///app/v1/foo/events",
-			wantedResult: false,
-		},
-	}
-
-	for _, tc := range testCases {
-		got := isARequestWithLegacyEvent(tc.inputURI)
-		if tc.wantedResult != got {
-			t.Errorf("incorrect result with inputURI: %s, wanted: %v, got: %v", tc.inputURI, tc.wantedResult, got)
-		}
-	}
-}
-
-// validateErrorResponse validates Error Response
-func validateErrorResponse(t *testing.T, resp http.Response, tcWantResponse *legacyapi.PublishEventResponses) {
-	legacyResponse := legacyapi.PublishEventResponses{}
-	legacyError := legacyapi.Error{}
-	bodyBytes, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("failed to read response body: %v", err)
-=======
 	// Setting up fake informers
 	scheme := runtime.NewScheme()
 	if err := corev1.AddToScheme(scheme); err != nil {
 		t.Fatalf("failed to add corev1 to scheme: %v", err)
->>>>>>> 88ee85c91 (Add /:app/v1/events/subscribed endpoint with the same functionality from)
 	}
 	if err := eventingv1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatalf("failed to add eventing v1alpha1 to scheme: %v", err)
@@ -714,21 +639,6 @@ func validateErrorResponse(t *testing.T, resp http.Response, tcWantResponse *leg
 		Version: subscribed.GVR.Version,
 		Kind:    "Subscription",
 	}
-<<<<<<< HEAD
-
-	if tcWantResponse.Ok.EventID != "" && tcWantResponse.Ok.EventID != legacyResponse.Ok.EventID {
-		t.Errorf("invalid event-id, want: %v, got: %v", tcWantResponse.Ok.EventID, legacyResponse.Ok.EventID)
-	}
-
-	if tcWantResponse.Ok.EventID == "" && !isValidEventID(legacyResponse.Ok.EventID) {
-		t.Errorf("should match regex: [%s] Not a valid event-id: %v ", legacy.AllowedEventIDChars, legacyResponse.Ok.EventID)
-	}
-	if tcWantResponse.Ok.Reason != legacyResponse.Ok.Reason {
-		t.Errorf("invalid reason, want: %v, got: %v", tcWantResponse.Ok.Reason, legacyResponse.Ok.Reason)
-	}
-	if tcWantResponse.Ok.Status != legacyResponse.Ok.Status {
-		t.Errorf("invalid status, want: %v, got: %v", tcWantResponse.Ok.Status, legacyResponse.Ok.Status)
-=======
 	subUnstructured.SetGroupVersionKind(subscriptionGVK)
 	// Configuring fake dynamic client
 	dynamicTestClient := dynamicfake.NewSimpleDynamicClient(scheme, subUnstructured)
@@ -808,33 +718,36 @@ func validateErrorResponse(t *testing.T, resp http.Response, tcWantResponse *leg
 				t.Errorf("incorrect response, wanted: %v, got: %v", testCase.wantResponse, gotEventsResponse)
 			}
 		})
->>>>>>> 88ee85c91 (Add /:app/v1/events/subscribed endpoint with the same functionality from)
 	}
 }
 
-// generatePort generates a random 5 digit port
-func generatePort() (int, error) {
-	max := 4
-	// Add 4 as prefix to make it 5 digits but less than 65535
-	add4AsPrefix := "4"
-	b := make([]byte, max)
-	n, err := io.ReadAtLeast(rand.Reader, b, max)
-	if n != max {
-		return 0, err
-	}
-	if err != nil {
-		return 0, err
-	}
-	for i := 0; i < len(b); i++ {
-		b[i] = table[int(b[i])%len(table)]
+func TestIsARequestWithLegacyEvent(t *testing.T) {
+	testCases := []struct {
+		inputURI     string
+		wantedResult bool
+	}{
+		{
+			inputURI:     "/app/v1/events",
+			wantedResult: true,
+		},
+		{
+			inputURI:     "///app/v1/events",
+			wantedResult: true,
+		},
+		{
+			inputURI:     "///app/v1//events",
+			wantedResult: false,
+		},
+		{
+			inputURI:     "///app/v1/foo/events",
+			wantedResult: false,
+		},
 	}
 
-	num, err := strconv.Atoi(fmt.Sprintf("%s%s", add4AsPrefix, string(b)))
-	if err != nil {
-		return 0, err
+	for _, tc := range testCases {
+		got := isARequestWithLegacyEvent(tc.inputURI)
+		if tc.wantedResult != got {
+			t.Errorf("incorrect result with inputURI: %s, wanted: %v, got: %v", tc.inputURI, tc.wantedResult, got)
+		}
 	}
-
-	return num, nil
 }
-
-var table = [...]byte{'1', '2', '3', '4', '5', '6', '7', '8', '9'}

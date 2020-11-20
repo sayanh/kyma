@@ -1,13 +1,6 @@
 package handler
 
 import (
-<<<<<<< HEAD
-=======
-	"github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/legacy-events"
-	"github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/options"
-	"github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/subscribed"
-
->>>>>>> 88ee85c91 (Add /:app/v1/events/subscribed endpoint with the same functionality from)
 	"context"
 	"io/ioutil"
 	"net/http"
@@ -16,6 +9,7 @@ import (
 
 	"github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/legacy-events"
 	"github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/options"
+	"github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/subscribed"
 
 	"github.com/sirupsen/logrus"
 

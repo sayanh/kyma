@@ -2,11 +2,15 @@ package testing
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/json"
+	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"reflect"
 	"regexp"
+	"strconv"
 	"testing"
 	"time"
 
@@ -224,3 +228,30 @@ func WaitForHandlerToStart(t *testing.T, healthEndpoint string) {
 		}
 	}
 }
+
+// GeneratePort generates a random 5 digit port
+func GeneratePort() (int, error) {
+	max := 4
+	// Add 4 as prefix to make it 5 digits but less than 65535
+	add4AsPrefix := "4"
+	b := make([]byte, max)
+	n, err := io.ReadAtLeast(rand.Reader, b, max)
+	if n != max {
+		return 0, err
+	}
+	if err != nil {
+		return 0, err
+	}
+	for i := 0; i < len(b); i++ {
+		b[i] = table[int(b[i])%len(table)]
+	}
+
+	num, err := strconv.Atoi(fmt.Sprintf("%s%s", add4AsPrefix, string(b)))
+	if err != nil {
+		return 0, err
+	}
+
+	return num, nil
+}
+
+var table = [...]byte{'1', '2', '3', '4', '5', '6', '7', '8', '9'}
