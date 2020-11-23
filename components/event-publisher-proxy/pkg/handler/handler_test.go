@@ -16,14 +16,22 @@ import (
 
 	"github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/legacy-events"
 	"github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/options"
-
-	"github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/oauth"
-	"github.com/sirupsen/logrus"
+	"github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/subscribed"
+	eventingv1alpha1 "github.com/kyma-project/kyma/components/eventing-controller/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic/dynamicinformer"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 
 	legacyapi "github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/legacy-events/api"
+	"github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/oauth"
 	"github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/receiver"
 	"github.com/kyma-project/kyma/components/event-publisher-proxy/pkg/sender"
 	testingutils "github.com/kyma-project/kyma/components/event-publisher-proxy/testing"
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -123,7 +131,7 @@ func TestHandler(t *testing.T) {
 		},
 	}
 
-	port, err := generatePort()
+	port, err := testingutils.GeneratePort()
 	if err != nil {
 		t.Fatalf("failed to generate port: %v", err)
 	}
@@ -155,14 +163,14 @@ func TestHandler(t *testing.T) {
 	msgReceiver := receiver.NewHttpMessageReceiver(cfg.Port)
 	legacyTransformer := legacy.NewTransformer("beb.ns", "event.type.prefix")
 	opts := &options.Options{MaxRequestSize: 65536}
-	handler := NewHandler(msgReceiver, msgSender, cfg.RequestTimeout, legacyTransformer, opts, logrus.New())
+	handler := NewHandler(msgReceiver, msgSender, cfg.RequestTimeout, legacyTransformer, opts, nil, logrus.New())
 	go func() {
 		if err := handler.Start(ctx); err != nil {
 			t.Errorf("failed to start handler with error: %v", err)
 		}
 	}()
 
-	waitForHandlerToStart(t, healthEndpoint)
+	testingutils.WaitForHandlerToStart(t, healthEndpoint)
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -182,7 +190,7 @@ func TestHandler(t *testing.T) {
 func TestHandlerTimeout(t *testing.T) {
 	t.Parallel()
 
-	port, err := generatePort()
+	port, err := testingutils.GeneratePort()
 	if err != nil {
 		t.Fatalf("failed to generate port: %v", err)
 	}
@@ -215,14 +223,14 @@ func TestHandlerTimeout(t *testing.T) {
 
 	legacyTransformer := legacy.NewTransformer("beb.ns", "event.type.prefix")
 	opts := &options.Options{MaxRequestSize: 65536}
-	handler := NewHandler(msgReceiver, msgSender, cfg.RequestTimeout, legacyTransformer, opts, logrus.New())
+	handler := NewHandler(msgReceiver, msgSender, cfg.RequestTimeout, legacyTransformer, opts, nil, logrus.New())
 	go func() {
 		if err := handler.Start(ctx); err != nil {
 			t.Errorf("failed to start handler with error: %v", err)
 		}
 	}()
 
-	waitForHandlerToStart(t, healthEndpoint)
+	testingutils.WaitForHandlerToStart(t, healthEndpoint)
 
 	body, headers := testingutils.StructuredCloudEventPayload, testingutils.GetStructuredMessageHeaders()
 	resp, err := testingutils.SendEvent(publishEndpoint, body, headers)
@@ -235,31 +243,9 @@ func TestHandlerTimeout(t *testing.T) {
 	}
 }
 
-func waitForHandlerToStart(t *testing.T, healthEndpoint string) {
-	timeout := time.After(time.Second * 30)
-	tick := time.Tick(time.Second * 1)
-
-	for {
-		select {
-		case <-timeout:
-			{
-				t.Fatal("Failed to start handler")
-			}
-		case <-tick:
-			{
-				if resp, err := http.Get(healthEndpoint); err != nil {
-					continue
-				} else if resp.StatusCode == http.StatusOK {
-					return
-				}
-			}
-		}
-	}
-}
-
 func TestHandlerForLegacyEvents(t *testing.T) {
 	t.Parallel()
-	port, err := generatePort()
+	port, err := testingutils.GeneratePort()
 	if err != nil {
 		t.Fatalf("failed to generate port: %v", err)
 	}
@@ -311,7 +297,7 @@ func TestHandlerForLegacyEvents(t *testing.T) {
 			},
 			wantStatusCode: http.StatusBadRequest,
 			wantResponse: legacyapi.PublishEventResponses{
-				Error: getInvalidValidationErrorFor("event-id"),
+				Error: testingutils.GetInvalidValidationErrorFor("event-id"),
 			},
 		},
 		{
@@ -321,7 +307,7 @@ func TestHandlerForLegacyEvents(t *testing.T) {
 			},
 			wantStatusCode: http.StatusBadRequest,
 			wantResponse: legacyapi.PublishEventResponses{
-				Error: getMissingFieldValidationErrorFor("event-time"),
+				Error: testingutils.GetMissingFieldValidationErrorFor("event-time"),
 			},
 		},
 		{
@@ -331,7 +317,7 @@ func TestHandlerForLegacyEvents(t *testing.T) {
 			},
 			wantStatusCode: http.StatusBadRequest,
 			wantResponse: legacyapi.PublishEventResponses{
-				Error: getMissingFieldValidationErrorFor("event-type"),
+				Error: testingutils.GetMissingFieldValidationErrorFor("event-type"),
 			},
 		},
 		{
@@ -341,7 +327,7 @@ func TestHandlerForLegacyEvents(t *testing.T) {
 			},
 			wantStatusCode: http.StatusBadRequest,
 			wantResponse: legacyapi.PublishEventResponses{
-				Error: getInvalidValidationErrorFor("event-time"),
+				Error: testingutils.GetInvalidValidationErrorFor("event-time"),
 			},
 		},
 		{
@@ -351,7 +337,7 @@ func TestHandlerForLegacyEvents(t *testing.T) {
 			},
 			wantStatusCode: http.StatusBadRequest,
 			wantResponse: legacyapi.PublishEventResponses{
-				Error: getMissingFieldValidationErrorFor("event-type-version"),
+				Error: testingutils.GetMissingFieldValidationErrorFor("event-type-version"),
 			},
 		},
 		{
@@ -361,7 +347,7 @@ func TestHandlerForLegacyEvents(t *testing.T) {
 			},
 			wantStatusCode: http.StatusBadRequest,
 			wantResponse: legacyapi.PublishEventResponses{
-				Error: getMissingFieldValidationErrorFor("data"),
+				Error: testingutils.GetMissingFieldValidationErrorFor("data"),
 			},
 		},
 	}
@@ -390,14 +376,14 @@ func TestHandlerForLegacyEvents(t *testing.T) {
 	msgReceiver := receiver.NewHttpMessageReceiver(cfg.Port)
 	legacyTransformer := legacy.NewTransformer(cfg.BEBNamespace, cfg.EventTypePrefix)
 	opts := &options.Options{MaxRequestSize: 65536}
-	handler := NewHandler(msgReceiver, msgSender, cfg.RequestTimeout, legacyTransformer, opts, logrus.New())
+	handler := NewHandler(msgReceiver, msgSender, cfg.RequestTimeout, legacyTransformer, opts, nil, logrus.New())
 	go func() {
 		if err := handler.Start(ctx); err != nil {
 			t.Errorf("failed to start handler with error: %v", err)
 		}
 	}()
 
-	waitForHandlerToStart(t, healthEndpoint)
+	testingutils.WaitForHandlerToStart(t, healthEndpoint)
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -413,9 +399,9 @@ func TestHandlerForLegacyEvents(t *testing.T) {
 			}
 
 			if testCase.wantStatusCode == http.StatusOK {
-				validateOkResponse(t, *resp, &testCase.wantResponse)
+				testingutils.ValidateOkResponse(t, *resp, &testCase.wantResponse)
 			} else {
-				validateErrorResponse(t, *resp, &testCase.wantResponse)
+				testingutils.ValidateErrorResponse(t, *resp, &testCase.wantResponse)
 			}
 		})
 	}
@@ -423,7 +409,7 @@ func TestHandlerForLegacyEvents(t *testing.T) {
 
 func TestHandlerForBEBFailures(t *testing.T) {
 	t.Parallel()
-	port, err := generatePort()
+	port, err := testingutils.GeneratePort()
 	if err != nil {
 		t.Fatalf("failed to generate port: %v", err)
 	}
@@ -458,14 +444,14 @@ func TestHandlerForBEBFailures(t *testing.T) {
 	msgReceiver := receiver.NewHttpMessageReceiver(cfg.Port)
 	legacyTransformer := legacy.NewTransformer(cfg.BEBNamespace, cfg.EventTypePrefix)
 	opts := &options.Options{MaxRequestSize: 65536}
-	handler := NewHandler(msgReceiver, msgSender, cfg.RequestTimeout, legacyTransformer, opts, logrus.New())
+	handler := NewHandler(msgReceiver, msgSender, cfg.RequestTimeout, legacyTransformer, opts, nil, logrus.New())
 	go func() {
 		if err := handler.Start(ctx); err != nil {
 			t.Errorf("failed to start handler with error: %v", err)
 		}
 	}()
 
-	waitForHandlerToStart(t, healthEndpoint)
+	testingutils.WaitForHandlerToStart(t, healthEndpoint)
 
 	testCases := []struct {
 		name           string
@@ -512,7 +498,7 @@ func TestHandlerForBEBFailures(t *testing.T) {
 			}
 
 			if testCase.endPoint == publishLegacyEndpoint {
-				validateErrorResponse(t, *resp, &testCase.wantResponse)
+				testingutils.ValidateErrorResponse(t, *resp, &testCase.wantResponse)
 			}
 		})
 	}
@@ -520,7 +506,7 @@ func TestHandlerForBEBFailures(t *testing.T) {
 
 func TestHandlerForHugeRequests(t *testing.T) {
 	t.Parallel()
-	port, err := generatePort()
+	port, err := testingutils.GeneratePort()
 	if err != nil {
 		t.Fatalf("failed to generate port: %v", err)
 	}
@@ -556,14 +542,14 @@ func TestHandlerForHugeRequests(t *testing.T) {
 
 	// Limiting the accepted size of the request to 2 Bytes
 	opts := &options.Options{MaxRequestSize: 2}
-	handler := NewHandler(msgReceiver, msgSender, cfg.RequestTimeout, legacyTransformer, opts, logrus.New())
+	handler := NewHandler(msgReceiver, msgSender, cfg.RequestTimeout, legacyTransformer, opts, nil, logrus.New())
 	go func() {
 		if err := handler.Start(ctx); err != nil {
 			t.Errorf("failed to start handler with error: %v", err)
 		}
 	}()
 
-	waitForHandlerToStart(t, healthEndpoint)
+	testingutils.WaitForHandlerToStart(t, healthEndpoint)
 
 	testCases := []struct {
 		name           string
@@ -606,6 +592,171 @@ func TestHandlerForHugeRequests(t *testing.T) {
 	}
 }
 
+func TestHandlerForSubscribedEndpoint(t *testing.T) {
+	t.Parallel()
+	port, err := testingutils.GeneratePort()
+	if err != nil {
+		t.Fatalf("failed to generate port: %v", err)
+	}
+	var (
+		subscribedEndpointFormat = "http://localhost:%d/%s/v1/events/subscribed"
+		healthEndpoint           = fmt.Sprintf("http://localhost:%d/healthz", port)
+		bebNs                    = "/beb.namespace"
+		eventTypePrefix          = "event.type.prefix."
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cfg := testingutils.NewEnvConfig(
+		// BEB details are not needed in this test
+		"",
+		"",
+		testingutils.WithPort(port),
+		testingutils.WithBEBNamespace(bebNs),
+		testingutils.WithEventTypePrefix(eventTypePrefix),
+	)
+	recv := receiver.NewHttpMessageReceiver(cfg.Port)
+	opts := &options.Options{MaxRequestSize: 65536}
+	legacyTransformer := legacy.NewTransformer(cfg.BEBNamespace, cfg.EventTypePrefix)
+
+	// Setting up fake informers
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add corev1 to scheme: %v", err)
+	}
+	if err := eventingv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add eventing v1alpha1 to scheme: %v", err)
+	}
+	subscription := testingutils.NewSubscription()
+
+	subUnstructuredMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(subscription)
+	if err != nil {
+		t.Fatalf("failed to convert subscription to unstructured obj: %v", err)
+	}
+	// Creating unstructured subscriptions
+	subUnstructured := &unstructured.Unstructured{
+		Object: subUnstructuredMap,
+	}
+	// Setting Kind information in unstructured subscription
+	subscriptionGVK := schema.GroupVersionKind{
+		Group:   subscribed.GVR.Group,
+		Version: subscribed.GVR.Version,
+		Kind:    "Subscription",
+	}
+	subUnstructured.SetGroupVersionKind(subscriptionGVK)
+	// Configuring fake dynamic client
+	dynamicTestClient := dynamicfake.NewSimpleDynamicClient(scheme, subUnstructured)
+
+	dFilteredSharedInfFactory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(dynamicTestClient,
+		10*time.Second,
+		v1.NamespaceAll,
+		nil,
+	)
+	genericInf := dFilteredSharedInfFactory.ForResource(subscribed.GVR)
+	t.Logf("Waiting for cache to resync")
+	subscribed.WaitForCacheSyncOrDie(ctx, dFilteredSharedInfFactory)
+	t.Logf("Informers resynced successfully")
+	subLister := genericInf.Lister()
+	subscribedProcessor := &subscribed.Processor{
+		SubscriptionLister: &subLister,
+		Config:             cfg,
+		Logger:             logrus.New(),
+	}
+
+	handler := NewHandler(recv, nil, cfg.RequestTimeout, legacyTransformer, opts, subscribedProcessor, logrus.New())
+	go func() {
+		if err := handler.Start(ctx); err != nil {
+			t.Errorf("failed to start handler with error: %v", err)
+		}
+	}()
+	testingutils.WaitForHandlerToStart(t, healthEndpoint)
+	testCases := []struct {
+		name               string
+		appName            string
+		inputSubscriptions []eventingv1alpha1.Subscription
+		wantStatusCode     int
+		wantResponse       subscribed.Events
+	}{
+		{
+			name:           "Send a request with a valid application name",
+			appName:        "valid-app",
+			wantStatusCode: http.StatusOK,
+			wantResponse: subscribed.Events{
+				EventsInfo: []subscribed.Event{{
+					Name:    "order.created",
+					Version: "v1",
+				}},
+			},
+		}, {
+			name:           "Send a request with an invalid application name",
+			appName:        "invalid-app",
+			wantStatusCode: http.StatusOK,
+			wantResponse: subscribed.Events{
+				EventsInfo: []subscribed.Event{},
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			subscribedURL := fmt.Sprintf(subscribedEndpointFormat, port, testCase.appName)
+			resp, err := testingutils.QuerySubscribedEndpoint(subscribedURL)
+			if err != nil {
+				t.Errorf("failed to send event with error: %v", err)
+			}
+
+			if testCase.wantStatusCode != resp.StatusCode {
+				t.Errorf("test failed, want status code:%d but got:%d", testCase.wantStatusCode, resp.StatusCode)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			respBodyBytes, err := ioutil.ReadAll(resp.Body)
+			if err != nil {
+				t.Errorf("failed to convert body to bytes: %v", err)
+			}
+			gotEventsResponse := subscribed.Events{}
+			err = json.Unmarshal(respBodyBytes, &gotEventsResponse)
+			if err != nil {
+				t.Errorf("failed to unmarshal body bytes to events response: %v", err)
+			}
+			if !reflect.DeepEqual(testCase.wantResponse, gotEventsResponse) {
+				t.Errorf("incorrect response, wanted: %v, got: %v", testCase.wantResponse, gotEventsResponse)
+			}
+		})
+	}
+}
+
+func TestIsARequestWithLegacyEvent(t *testing.T) {
+	testCases := []struct {
+		inputURI     string
+		wantedResult bool
+	}{
+		{
+			inputURI:     "/app/v1/events",
+			wantedResult: true,
+		},
+		{
+			inputURI:     "///app/v1/events",
+			wantedResult: true,
+		},
+		{
+			inputURI:     "///app/v1//events",
+			wantedResult: false,
+		},
+		{
+			inputURI:     "///app/v1/foo/events",
+			wantedResult: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		got := isARequestWithLegacyEvent(tc.inputURI)
+		if tc.wantedResult != got {
+			t.Errorf("incorrect result with inputURI: %s, wanted: %v, got: %v", tc.inputURI, tc.wantedResult, got)
+		}
+	}
+}
+
 // getMissingFieldValidationErrorFor generates an Error message for a missing field
 func getMissingFieldValidationErrorFor(field string) *legacyapi.Error {
 	return &legacyapi.Error{
@@ -642,37 +793,6 @@ func getInvalidValidationErrorFor(field string) *legacyapi.Error {
 				MoreInfo: "",
 			},
 		},
-	}
-}
-
-func TestIsARequestWithLegacyEvent(t *testing.T) {
-	testCases := []struct {
-		inputURI     string
-		wantedResult bool
-	}{
-		{
-			inputURI:     "/app/v1/events",
-			wantedResult: true,
-		},
-		{
-			inputURI:     "///app/v1/events",
-			wantedResult: true,
-		},
-		{
-			inputURI:     "///app/v1//events",
-			wantedResult: false,
-		},
-		{
-			inputURI:     "///app/v1/foo/events",
-			wantedResult: false,
-		},
-	}
-
-	for _, tc := range testCases {
-		got := isARequestWithLegacyEvent(tc.inputURI)
-		if tc.wantedResult != got {
-			t.Errorf("incorrect result with inputURI: %s, wanted: %v, got: %v", tc.inputURI, tc.wantedResult, got)
-		}
 	}
 }
 
