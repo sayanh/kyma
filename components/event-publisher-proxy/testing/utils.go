@@ -58,10 +58,7 @@ func SendEvent(endpoint, body string, headers http.Header) (*http.Response, erro
 }
 
 func GetStructuredMessageHeaders() http.Header {
-	return http.Header{
-		"Content-Type": []string{"application/cloudevents+json"},
-		"x-b3-traceid": []string{"foo"},
-	}
+	return http.Header{"Content-Type": []string{"application/cloudevents+json"}}
 }
 
 func GetBinaryMessageHeaders() http.Header {

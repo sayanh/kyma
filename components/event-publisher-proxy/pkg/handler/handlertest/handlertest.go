@@ -123,34 +123,34 @@ var (
 		WantStatusCode int
 	}{
 		// structured cloudevents
-		//{
-		//	Name: "Structured CloudEvent without id",
-		//	ProvideMessage: func() (string, http.Header) {
-		//		return testingutils.StructuredCloudEventPayloadWithoutID, testingutils.GetStructuredMessageHeaders()
-		//	},
-		//	WantStatusCode: http.StatusBadRequest,
-		//},
-		//{
-		//	Name: "Structured CloudEvent without type",
-		//	ProvideMessage: func() (string, http.Header) {
-		//		return testingutils.StructuredCloudEventPayloadWithoutType, testingutils.GetStructuredMessageHeaders()
-		//	},
-		//	WantStatusCode: http.StatusBadRequest,
-		//},
-		//{
-		//	Name: "Structured CloudEvent without specversion",
-		//	ProvideMessage: func() (string, http.Header) {
-		//		return testingutils.StructuredCloudEventPayloadWithoutSpecVersion, testingutils.GetStructuredMessageHeaders()
-		//	},
-		//	WantStatusCode: http.StatusBadRequest,
-		//},
-		//{
-		//	Name: "Structured CloudEvent without source",
-		//	ProvideMessage: func() (string, http.Header) {
-		//		return testingutils.StructuredCloudEventPayloadWithoutSource, testingutils.GetStructuredMessageHeaders()
-		//	},
-		//	WantStatusCode: http.StatusBadRequest,
-		//},
+		{
+			Name: "Structured CloudEvent without id",
+			ProvideMessage: func() (string, http.Header) {
+				return testingutils.StructuredCloudEventPayloadWithoutID, testingutils.GetStructuredMessageHeaders()
+			},
+			WantStatusCode: http.StatusBadRequest,
+		},
+		{
+			Name: "Structured CloudEvent without type",
+			ProvideMessage: func() (string, http.Header) {
+				return testingutils.StructuredCloudEventPayloadWithoutType, testingutils.GetStructuredMessageHeaders()
+			},
+			WantStatusCode: http.StatusBadRequest,
+		},
+		{
+			Name: "Structured CloudEvent without specversion",
+			ProvideMessage: func() (string, http.Header) {
+				return testingutils.StructuredCloudEventPayloadWithoutSpecVersion, testingutils.GetStructuredMessageHeaders()
+			},
+			WantStatusCode: http.StatusBadRequest,
+		},
+		{
+			Name: "Structured CloudEvent without source",
+			ProvideMessage: func() (string, http.Header) {
+				return testingutils.StructuredCloudEventPayloadWithoutSource, testingutils.GetStructuredMessageHeaders()
+			},
+			WantStatusCode: http.StatusBadRequest,
+		},
 		{
 			Name: "Structured CloudEvent is valid",
 			ProvideMessage: func() (string, http.Header) {
@@ -159,49 +159,49 @@ var (
 			WantStatusCode: http.StatusNoContent,
 		},
 		// binary cloudevents
-		//{
-		//	Name: "Binary CloudEvent without CE-ID header",
-		//	ProvideMessage: func() (string, http.Header) {
-		//		headers := testingutils.GetBinaryMessageHeaders()
-		//		headers.Del(testingutils.CeIDHeader)
-		//		return fmt.Sprintf(`"%s"`, testingutils.CloudEventData), headers
-		//	},
-		//	WantStatusCode: http.StatusBadRequest,
-		//},
-		//{
-		//	Name: "Binary CloudEvent without CE-Type header",
-		//	ProvideMessage: func() (string, http.Header) {
-		//		headers := testingutils.GetBinaryMessageHeaders()
-		//		headers.Del(testingutils.CeTypeHeader)
-		//		return fmt.Sprintf(`"%s"`, testingutils.CloudEventData), headers
-		//	},
-		//	WantStatusCode: http.StatusBadRequest,
-		//},
-		//{
-		//	Name: "Binary CloudEvent without CE-SpecVersion header",
-		//	ProvideMessage: func() (string, http.Header) {
-		//		headers := testingutils.GetBinaryMessageHeaders()
-		//		headers.Del(testingutils.CeSpecVersionHeader)
-		//		return fmt.Sprintf(`"%s"`, testingutils.CloudEventData), headers
-		//	},
-		//	WantStatusCode: http.StatusBadRequest,
-		//},
-		//{
-		//	Name: "Binary CloudEvent without CE-Source header",
-		//	ProvideMessage: func() (string, http.Header) {
-		//		headers := testingutils.GetBinaryMessageHeaders()
-		//		headers.Del(testingutils.CeSourceHeader)
-		//		return fmt.Sprintf(`"%s"`, testingutils.CloudEventData), headers
-		//	},
-		//	WantStatusCode: http.StatusBadRequest,
-		//},
-		//{
-		//	Name: "Binary CloudEvent is valid with required headers",
-		//	ProvideMessage: func() (string, http.Header) {
-		//		return fmt.Sprintf(`"%s"`, testingutils.CloudEventData), testingutils.GetBinaryMessageHeaders()
-		//	},
-		//	WantStatusCode: http.StatusNoContent,
-		//},
+		{
+			Name: "Binary CloudEvent without CE-ID header",
+			ProvideMessage: func() (string, http.Header) {
+				headers := testingutils.GetBinaryMessageHeaders()
+				headers.Del(testingutils.CeIDHeader)
+				return fmt.Sprintf(`"%s"`, testingutils.CloudEventData), headers
+			},
+			WantStatusCode: http.StatusBadRequest,
+		},
+		{
+			Name: "Binary CloudEvent without CE-Type header",
+			ProvideMessage: func() (string, http.Header) {
+				headers := testingutils.GetBinaryMessageHeaders()
+				headers.Del(testingutils.CeTypeHeader)
+				return fmt.Sprintf(`"%s"`, testingutils.CloudEventData), headers
+			},
+			WantStatusCode: http.StatusBadRequest,
+		},
+		{
+			Name: "Binary CloudEvent without CE-SpecVersion header",
+			ProvideMessage: func() (string, http.Header) {
+				headers := testingutils.GetBinaryMessageHeaders()
+				headers.Del(testingutils.CeSpecVersionHeader)
+				return fmt.Sprintf(`"%s"`, testingutils.CloudEventData), headers
+			},
+			WantStatusCode: http.StatusBadRequest,
+		},
+		{
+			Name: "Binary CloudEvent without CE-Source header",
+			ProvideMessage: func() (string, http.Header) {
+				headers := testingutils.GetBinaryMessageHeaders()
+				headers.Del(testingutils.CeSourceHeader)
+				return fmt.Sprintf(`"%s"`, testingutils.CloudEventData), headers
+			},
+			WantStatusCode: http.StatusBadRequest,
+		},
+		{
+			Name: "Binary CloudEvent is valid with required headers",
+			ProvideMessage: func() (string, http.Header) {
+				return fmt.Sprintf(`"%s"`, testingutils.CloudEventData), testingutils.GetBinaryMessageHeaders()
+			},
+			WantStatusCode: http.StatusNoContent,
+		},
 	}
 
 	TestCasesForLegacyEvents = []struct {
