@@ -2,6 +2,7 @@ package eventmesh
 
 import (
 	"github.com/sirupsen/logrus"
+	"k8s.io/client-go/dynamic"
 
 	scclientset "github.com/kubernetes-incubator/service-catalog/pkg/client/clientset_generated/clientset"
 
@@ -27,11 +28,18 @@ type EventMeshUpgradeTest struct {
 	appBrokerCli          appbrokerclientset.Interface
 	scCli                 scclientset.Interface
 	eventingCli           eventingv1alpha1clientset.EventingV1alpha1Interface
+	dynamicInf            dynamic.Interface
 	subscriberImage       string
+	action                string
 }
 
 // compile time assertion
 var _ runner.UpgradeTest = &EventMeshUpgradeTest{}
+
+const (
+	prepareDataActionName  = "prepareData"
+	executeTestsActionName = "executeTests"
+)
 
 func NewEventMeshUpgradeTest(
 	appConnectorCli appconnectorclientset.Interface,
@@ -41,7 +49,9 @@ func NewEventMeshUpgradeTest(
 	appBrokerCli appbrokerclientset.Interface,
 	scCli scclientset.Interface,
 	eventingCli eventingv1alpha1clientset.EventingV1alpha1Interface,
-	subscriberImage string) runner.UpgradeTest {
+	dynamicInf dynamic.Interface,
+	subscriberImage string,
+	action string) runner.UpgradeTest {
 	return &EventMeshUpgradeTest{
 		k8sInterface:          k8sCli,
 		messagingClient:       messagingCli,
@@ -50,7 +60,9 @@ func NewEventMeshUpgradeTest(
 		appBrokerCli:          appBrokerCli,
 		scCli:                 scCli,
 		eventingCli:           eventingCli,
+		dynamicInf:            dynamicInf,
 		subscriberImage:       subscriberImage,
+		action:                action,
 	}
 }
 
@@ -81,28 +93,49 @@ func (e *EventMeshUpgradeTest) CreateResources(stop <-chan struct{}, log logrus.
 func (e *EventMeshUpgradeTest) TestResources(stop <-chan struct{}, log logrus.FieldLogger, namespace string) error {
 	f := newEventMeshFlow(e, stop, log, namespace)
 
-	for _, fn := range []func() error{
-		// Steps to test:
-		// Check subscriber is ready or not
-		// Check readiness for Brokers
-		// Check readiness for Triggers
-		// Check readiness for EventActivation
-		// Publish an event to the event service
-		// Check event reached subscriber
-		f.WaitForApplication,
-		f.WaitForSubscriber,
-		f.WaitForServiceInstance,
-		f.WaitForBroker,
-		f.WaitForTrigger,
-		f.PublishTestEvent,
-		f.CheckEvent,
-	} {
-		err := fn()
-		if err != nil {
-			// f.log.WithField("error", err).Error("TestResources() failed")
-			return err
+	switch e.action {
+	case prepareDataActionName:
+		for _, fn := range []func() error{
+			// Steps to test:
+			// Check subscriber is ready or not
+			// Check readiness for Brokers
+			// Check readiness for Triggers
+			// Check readiness for EventActivation
+			// Publish an event to the event service
+			// Check event reached subscriber
+			f.WaitForApplication,
+			f.WaitForSubscriber,
+			f.WaitForServiceInstance,
+			f.WaitForBroker,
+			f.WaitForTrigger,
+			f.PublishTestEvent,
+			f.CheckEvent,
+		} {
+			err := fn()
+			if err != nil {
+				// f.log.WithField("error", err).Error("TestResources() failed")
+				return err
+			}
+		}
+	case executeTestsActionName:
+		for _, fn := range []func() error{
+			// Steps to test:
+			// Check subscriber is ready or not
+			// Check readiness for Kyma Subscriptions
+			// Publish an event to the event publisher proxy
+			// Check event reached subscriber
+			f.WaitForSubscriber,
+			f.WaitForServiceInstance,
+			f.WaitForSubscription,
+			f.PublishTestEventToEPP,
+			f.CheckEvent,
+		} {
+			err := fn()
+			if err != nil {
+				// f.log.WithField("error", err).Error("TestResources() failed")
+				return err
+			}
 		}
 	}
-
 	return nil
 }

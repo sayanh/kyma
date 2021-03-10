@@ -2,24 +2,28 @@ package helpers
 
 import (
 	"fmt"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"log"
 	"net"
 	"net/http"
 	"strings"
 	"time"
 
+	"k8s.io/client-go/dynamic"
+
 	"github.com/avast/retry-go"
 	"github.com/pkg/errors"
 
-	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/kubernetes"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 
 	"knative.dev/eventing/pkg/apis/eventing/v1alpha1"
 	eventingclientv1alpha1 "knative.dev/eventing/pkg/client/clientset/versioned/typed/eventing/v1alpha1"
 	"knative.dev/pkg/apis"
 	duckv1 "knative.dev/pkg/apis/duck/v1"
+	kymaeventingv1alpha1 "github.com/kyma-project/kyma/components/eventing-controller/api/v1alpha1"
 )
 
 const timeout = time.Second * 30
@@ -155,6 +159,52 @@ func WaitForTrigger(eventingCli eventingclientv1alpha1.EventingV1alpha1Interface
 		}, retryOptions...)
 }
 
+func GroupVersionResource() schema.GroupVersionResource {
+	return schema.GroupVersionResource{
+		Version:  kymaeventingv1alpha1.GroupVersion.Version,
+		Group:    kymaeventingv1alpha1.GroupVersion.Group,
+		Resource: "subscriptions",
+	}
+}
+
+func WaitForSubscription(dynamicInf dynamic.Interface, subName, namespace string, retryOptions ...retry.Option) error {
+	return retry.Do(
+		func() error {
+			labelSelector := map[string]string{
+				"function": subName,
+			}
+			listOptions := metav1.ListOptions{LabelSelector: labels.SelectorFromSet(labelSelector).String()}
+			subscriptions, err := dynamicInf.Resource(GroupVersionResource()).List(listOptions)
+			if err != nil {
+				return err
+			}
+			if len(subscriptions.Items) == 0 {
+				return fmt.Errorf("subscriptions with labels: %+v  not found", labelSelector)
+			}
+
+			// Expecting only one subscription
+			subUnstructured := subscriptions.Items[0]
+
+			sub, err := toSubscription(&subUnstructured)
+			if err != nil {
+				return errors.Wrapf(err, "failed to convert to structured")
+			}
+			if !sub.Status.IsReady() {
+				return fmt.Errorf("subscription %s not ready: %v", sub.Name, sub.Status)
+			}
+			return nil
+		}, retryOptions...)
+}
+
+func toSubscription(unstructuredSub *unstructured.Unstructured) (*kymaeventingv1alpha1.Subscription, error) {
+	subscription := new(kymaeventingv1alpha1.Subscription)
+	err := k8sruntime.DefaultUnstructuredConverter.FromUnstructured(unstructuredSub.Object, subscription)
+	if err != nil {
+		return nil, err
+	}
+	return subscription, nil
+}
+
 func WaitForBroker(eventingCli eventingclientv1alpha1.EventingV1alpha1Interface, name, namespace string, retryOptions ...retry.Option) error {
 	return retry.Do(
 		func() error {
@@ -170,51 +220,51 @@ func WaitForBroker(eventingCli eventingclientv1alpha1.EventingV1alpha1Interface,
 		}, retryOptions...)
 }
 
-func RemoveBrokerInjectionLabel(k8sInf kubernetes.Interface, namespace string, retryOptions ...retry.Option) error {
-	return retry.Do(
-		func() error {
-			ns, err := k8sInf.CoreV1().Namespaces().Get(namespace, metav1.GetOptions{})
-			if err != nil {
-				return err
-			}
-			delete(ns.Labels, "knative-eventing-injection")
-			_, err = k8sInf.CoreV1().Namespaces().Update(ns)
-			if err != nil {
-				return err
-			}
-			return nil
-		}, retryOptions...)
-}
-
-func DeleteBroker(eventingInf eventingclientv1alpha1.EventingV1alpha1Interface, name, namespace string, retryOptions ...retry.Option) error {
-	err := retry.Do(
-		func() error {
-			err := eventingInf.Brokers(namespace).Delete(name, &metav1.DeleteOptions{})
-			if err != nil {
-				return err
-			}
-			return nil
-		}, retryOptions...)
-
-	if err != nil {
-		return err
-	}
-
-	return retry.Do(
-		func() error {
-			broker, err := eventingInf.Brokers(namespace).Get(name, metav1.GetOptions{})
-			if k8serrors.IsNotFound(err) {
-				return nil
-			}
-			if err != nil {
-				return err
-			}
-			if broker.Name == name {
-				return fmt.Errorf("broker: %s still exists in ns: %s", name, namespace)
-			}
-			return nil
-		}, retryOptions...)
-}
+//func RemoveBrokerInjectionLabel(k8sInf kubernetes.Interface, namespace string, retryOptions ...retry.Option) error {
+//	return retry.Do(
+//		func() error {
+//			ns, err := k8sInf.CoreV1().Namespaces().Get(namespace, metav1.GetOptions{})
+//			if err != nil {
+//				return err
+//			}
+//			delete(ns.Labels, "knative-eventing-injection")
+//			_, err = k8sInf.CoreV1().Namespaces().Update(ns)
+//			if err != nil {
+//				return err
+//			}
+//			return nil
+//		}, retryOptions...)
+//}
+//
+//func DeleteBroker(eventingInf eventingclientv1alpha1.EventingV1alpha1Interface, name, namespace string, retryOptions ...retry.Option) error {
+//	err := retry.Do(
+//		func() error {
+//			err := eventingInf.Brokers(namespace).Delete(name, &metav1.DeleteOptions{})
+//			if err != nil {
+//				return err
+//			}
+//			return nil
+//		}, retryOptions...)
+//
+//	if err != nil {
+//		return err
+//	}
+//
+//	return retry.Do(
+//		func() error {
+//			broker, err := eventingInf.Brokers(namespace).Get(name, metav1.GetOptions{})
+//			if k8serrors.IsNotFound(err) {
+//				return nil
+//			}
+//			if err != nil {
+//				return err
+//			}
+//			if broker.Name == name {
+//				return fmt.Errorf("broker: %s still exists in ns: %s", name, namespace)
+//			}
+//			return nil
+//		}, retryOptions...)
+//}
 
 // Verify that the http response has the given status code and return an error if not
 func verifyStatusCode(res *http.Response, expectedStatusCode int) error {

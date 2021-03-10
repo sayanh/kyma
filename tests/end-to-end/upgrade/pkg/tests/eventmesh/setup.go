@@ -13,9 +13,11 @@ import (
 
 const (
 	integrationNamespace = "kyma-integration"
+	kymaSystemNamespace = "kyma-system"
 	eventServiceSuffix   = "event-service"
 	eventServicePort     = "8081"
 	defaultName          = "eventmesh-upgrade"
+	eppSvcName = "eventing-event-publisher-proxy"
 )
 
 type eventMeshFlow struct {
@@ -100,6 +102,14 @@ func (f *eventMeshFlow) WaitForTrigger() error {
 	return helpers.WaitForTrigger(f.eventingCli, f.subscriptionName, f.namespace)
 }
 
+func (f *eventMeshFlow) WaitForSubscription() error {
+	return helpers.WaitForSubscription(f.dynamicInf, f.subscriptionName, f.namespace)
+}
+
 func (f *eventMeshFlow) PublishTestEvent() error {
 	return helpers.SendEvent(fmt.Sprintf("http://%s-%s.%s.svc.cluster.local:%s/%s/v1/events", f.applicationName, eventServiceSuffix, integrationNamespace, eventServicePort, f.applicationName), f.eventType, f.eventTypeVersion)
+}
+
+func (f *eventMeshFlow) PublishTestEventToEPP() error {
+	return helpers.SendEvent(fmt.Sprintf("http://%s.%s.svc.cluster.local/%s/v1/events", eppSvcName, eventServiceSuffix, kymaSystemNamespace, f.applicationName), f.eventType, f.eventTypeVersion)
 }

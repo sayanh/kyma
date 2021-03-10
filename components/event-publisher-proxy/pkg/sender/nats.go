@@ -41,6 +41,8 @@ func (h *NatsMessageSender) Send(ctx context.Context, event *cev2event.Event) (i
 		h.logger.Errorf("Failed to create nats protocol, %s", err.Error())
 		return http.StatusInternalServerError, err
 	}
+	h.logger.Infof(event.Extensions())
+	h.logger.Infof(ctx)
 
 	client, err := cev2.NewClient(sender)
 	if err != nil {
