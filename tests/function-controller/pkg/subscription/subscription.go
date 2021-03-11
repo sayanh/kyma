@@ -1,9 +1,11 @@
 package subscription
 
 import (
-	"context"
+	"fmt"
 	"net/url"
 	"time"
+
+	"k8s.io/client-go/util/retry"
 
 	"github.com/kyma-project/kyma/tests/function-controller/pkg/helpers"
 	"github.com/kyma-project/kyma/tests/function-controller/pkg/resource"
@@ -51,35 +53,22 @@ func (s *Subscription) Create(funcName string, sinkUrl *url.URL) (string, error)
 				"namespace": s.namespace,
 			},
 			"spec": map[string]interface{}{
-				"id":       "id",
-				"protocol": "NATS",
-				"protocolsettings": map[string]interface{}{
-					"contentMode":     "BINARY",
-					"exemptHandshake": true,
-					"qos":             "AT_LEAST_ONCE",
-					"webhookAuth": map[string]interface{}{
-						"type":         "oauth2",
-						"grantType":    "client_credentials",
-						"clientId":     "xxx",
-						"clientSecret": "xxx",
-						"tokenUrl":     "https://oauth2.xxx.com/oauth2/token",
-						"scope":        []string{"guid-identifier"},
-					},
-				},
-				"sink": sinkUrl.String(),
+				"id":               "id",
+				"protocol":         "",
+				"protocolsettings": map[string]interface{}{},
+				"sink":             sinkUrl.String(),
 				"filter": map[string]interface{}{
-					"dialect": "beb",
 					"filters": []map[string]interface{}{
 						{
 							"eventSource": map[string]interface{}{
 								"type":     "exact",
 								"property": "source",
-								"value":    "/default/kyma/id",
+								"value":    "",
 							},
 							"eventType": map[string]interface{}{
 								"type":     "exact",
 								"property": "type",
-								"value":    "sap.kyma.testapp1023.order.created.v1",
+								"value":    "sap.kyma.custom.testapp1023.order.created.v1",
 							},
 						},
 					},
@@ -119,15 +108,19 @@ func (s *Subscription) WaitForStatusRunning() error {
 		return err
 	}
 
-	if s.isStateReady(*subscription) {
-		return nil
-	}
+	err = retry.OnError(retry.DefaultBackoff, func(err error) bool {
+		if err != nil {
+			return true
+		}
+		return false
+	}, func() error {
+		if s.isStateReady(*subscription) {
+			return nil
+		}
+		return fmt.Errorf("sub: %s is ready yet, retrying", subscription.GetName())
+	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), s.waitTimeout)
-	defer cancel()
-
-	condition := s.isSubscriptionReady()
-	return resource.WaitUntilConditionSatisfied(ctx, s.resCli.ResCli, condition)
+	return nil
 }
 
 func (s *Subscription) LogResource() error {
@@ -163,16 +156,11 @@ func (s *Subscription) isSubscriptionReady() func(event watch.Event) (bool, erro
 func (s *Subscription) isStateReady(subscription unstructured.Unstructured) bool {
 	correctCode := "OK"
 
+	// TODO: Convert unstructured to Subscription and get the status
 	subscriptionStatusCode, subscriptionStatusCodeFound, err := unstructured.NestedString(subscription.Object, "status", "SubscriptionRuleStatus", "code")
 	subscriptionStatus := err != nil || !subscriptionStatusCodeFound || subscriptionStatusCode != correctCode
 
-	virtualServiceStatusCode, virtualServiceStatusCodeFound, err := unstructured.NestedString(subscription.Object, "status", "virtualServiceStatus", "code")
-	virtualServiceStatus := err != nil || !virtualServiceStatusCodeFound || virtualServiceStatusCode != correctCode
-
-	accessRuleStatusCode, accessRuleStatusCodeFound, err := unstructured.NestedString(subscription.Object, "status", "accessRuleStatus", "code")
-	accessRuleStatus := err != nil || !accessRuleStatusCodeFound || accessRuleStatusCode != correctCode
-
-	ready := subscriptionStatus && virtualServiceStatus && accessRuleStatus
+	ready := subscriptionStatus
 
 	shared.LogReadiness(ready, s.verbose, s.name, s.log, subscription)
 
