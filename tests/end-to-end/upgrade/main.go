@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/kyma-project/kyma/tests/end-to-end/upgrade/pkg/tests/eventing"
+
 	monitoringv1 "github.com/coreos/prometheus-operator/pkg/client/versioned/typed/monitoring/v1"
 	sc "github.com/kubernetes-incubator/service-catalog/pkg/client/clientset_generated/clientset"
 	mfClient "github.com/kyma-project/kyma/common/microfrontend-client/pkg/client/clientset/versioned"
 	ab "github.com/kyma-project/kyma/components/application-broker/pkg/client/clientset/versioned"
 	ao "github.com/kyma-project/kyma/components/application-operator/pkg/client/clientset/versioned"
-	sourcesv1alpha1 "github.com/kyma-project/kyma/components/event-sources/client/generated/clientset/internalclientset/typed/sources/v1alpha1"
 	"github.com/kyma-project/kyma/components/kyma-operator/pkg/overrides"
 	bu "github.com/kyma-project/kyma/components/service-binding-usage-controller/pkg/client/clientset/versioned"
 	"github.com/pkg/errors"
@@ -21,8 +22,6 @@ import (
 	k8sclientset "k8s.io/client-go/kubernetes"
 	restClient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	eventingclientv1alpha1 "knative.dev/eventing/pkg/client/clientset/versioned/typed/eventing/v1alpha1"
-	messagingclientv1alpha1 "knative.dev/eventing/pkg/client/clientset/versioned/typed/messaging/v1alpha1"
 
 	"github.com/kyma-project/kyma/tests/end-to-end/upgrade/internal/platform/logger"
 	"github.com/kyma-project/kyma/tests/end-to-end/upgrade/internal/platform/signal"
@@ -31,7 +30,6 @@ import (
 	"github.com/kyma-project/kyma/tests/end-to-end/upgrade/pkg/injector"
 	apigateway "github.com/kyma-project/kyma/tests/end-to-end/upgrade/pkg/tests/api-gateway"
 	applicationoperator "github.com/kyma-project/kyma/tests/end-to-end/upgrade/pkg/tests/application-operator"
-	"github.com/kyma-project/kyma/tests/end-to-end/upgrade/pkg/tests/eventmesh"
 	"github.com/kyma-project/kyma/tests/end-to-end/upgrade/pkg/tests/logging"
 	"github.com/kyma-project/kyma/tests/end-to-end/upgrade/pkg/tests/monitoring"
 	"github.com/kyma-project/kyma/tests/end-to-end/upgrade/pkg/tests/rafter"
@@ -99,9 +97,6 @@ func main() {
 	appBrokerCli, err := ab.NewForConfig(k8sConfig)
 	fatalOnError(err, "while creating Application Broker clientset")
 
-	messagingCli, err := messagingclientv1alpha1.NewForConfig(k8sConfig)
-	fatalOnError(err, "while creating knative Messaging clientset")
-
 	domainName, err := getDomainNameFromCluster(k8sCli)
 	fatalOnError(err, "while reading domain name from cluster")
 
@@ -113,12 +108,6 @@ func main() {
 
 	dexConfig, err := getDexConfigFromCluster(k8sCli, cfg.DexUserSecret, cfg.DexNamespace, domainName)
 	fatalOnError(err, "while reading dex config from cluster")
-
-	sourcesCli, err := sourcesv1alpha1.NewForConfig(k8sConfig)
-	fatalOnError(err, "while generating sources client")
-
-	eventingCli, err := eventingclientv1alpha1.NewForConfig(k8sConfig)
-	fatalOnError(err, "while generating knative eventing client")
 
 	monitoringCli, err := monitoringv1.NewForConfig(k8sConfig)
 	fatalOnError(err, "while generating monitoring client")
@@ -139,7 +128,7 @@ func main() {
 	tests := map[string]runner.UpgradeTest{
 		"HelmBrokerUpgradeTest":           servicecatalog.NewHelmBrokerTest(aInjector, k8sCli, scCli, buCli),
 		"HelmBrokerConflictUpgradeTest":   servicecatalog.NewHelmBrokerConflictTest(aInjector, k8sCli, scCli, buCli),
-		"ApplicationBrokerUpgradeTest":    servicecatalog.NewAppBrokerUpgradeTest(scCli, k8sCli, buCli, appBrokerCli, appConnectorCli, messagingCli),
+		"ApplicationBrokerUpgradeTest":    servicecatalog.NewAppBrokerUpgradeTest(scCli, k8sCli, buCli, appBrokerCli, appConnectorCli),
 		"GrafanaUpgradeTest":              monitoring.NewGrafanaUpgradeTest(k8sCli),
 		"TargetsAndRulesUpgradeTest":      monitoring.NewTargetsAndRulesTest(k8sCli, monitoringCli),
 		"MetricsUpgradeTest":              metricUpgradeTest,
@@ -148,8 +137,7 @@ func main() {
 		"ApiGatewayUpgradeTest":           apigateway.NewApiGatewayTest(k8sCli, dynamicCli, domainName, dexConfig.IdProviderConfig()),
 		"ApplicationOperatorUpgradeTest":  applicationoperator.NewApplicationOperatorUpgradeTest(appConnectorCli, *k8sCli),
 		"RafterUpgradeTest":               rafter.NewRafterUpgradeTest(dynamicCli),
-		"EventMeshUpgradeTest":            eventmesh.NewEventMeshUpgradeTest(appConnectorCli, k8sCli, messagingCli, sourcesCli, appBrokerCli, scCli, eventingCli, cfg.EventSubscriberImage),
-		"EventingUpgradeTest":             eventmesh.NewEventingUpgradeTest(k8sCli, dynamicCli),
+		"EventingUpgradeTest":             eventing.NewEventingUpgradeTest(k8sCli, appConnectorCli, appBrokerCli, scCli, dynamicCli, cfg.EventSubscriberImage),
 		"ServerlessUpgradeTest":           serverless.New(dynamicCli),
 		"LoggingUpgradeTest":              logging.NewLoggingTest(k8sCli, domainName, dexConfig.IdProviderConfig()),
 	}

@@ -11,7 +11,6 @@ import (
 	sbu "github.com/kyma-project/kyma/components/service-binding-usage-controller/pkg/apis/servicecatalog/v1alpha1"
 	appsV1 "k8s.io/api/apps/v1"
 	coreV1 "k8s.io/api/core/v1"
-	ch "knative.dev/eventing/pkg/apis/messaging/v1alpha1"
 
 	"github.com/sirupsen/logrus"
 )
@@ -64,12 +63,6 @@ type (
 type (
 	Application struct {
 		Status appOpr.ApplicationStatus
-	}
-)
-
-type (
-	Channel struct {
-		Status ch.ChannelStatus
 	}
 )
 
@@ -362,23 +355,6 @@ func (r *Report) AddApplications(applications *appOpr.ApplicationList, err error
 		}
 	}
 	r.Details["Application"] = fmt.Sprintf("%s (%s)", r.Details["Application"], strings.Join(names, ", "))
-}
-
-func (r *Report) AddChannels(channels *ch.ChannelList, err error) {
-	if err != nil {
-		r.Warnings["Channel"] = fmt.Sprintf("cannot fetch Channels list: %s", err)
-		return
-	}
-
-	r.Details["Channel"] = fmt.Sprintf("report found %d Channels", len(channels.Items))
-	names := make([]string, 0)
-	for _, channel := range channels.Items {
-		names = append(names, channel.Name)
-		r.Channels[channel.Name] = Channel{
-			Status: channel.Status,
-		}
-	}
-	r.Details["Channel"] = fmt.Sprintf("%s (%s)", r.Details["Channel"], strings.Join(names, ", "))
 }
 
 func (r *Report) AddLogs(name string, logs []string, grepWords []string, err error) {
